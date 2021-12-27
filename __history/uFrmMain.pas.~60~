@@ -1,0 +1,328 @@
+UNIT uFrmMain;
+
+interface
+
+uses
+  uCola,
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, Menus, Vcl.Imaging.pngimage, Vcl.ExtCtrls;
+
+type
+  TForm1 = class(TForm)
+    MainMenu : TMainMenu;
+    Juego1 : TMenuItem;
+    Jugar  : TMenuItem;
+    N1     : TMenuItem;
+    Salir  : TMenuItem;
+    Image1: TImage;
+
+    procedure FormCreate(Sender: TObject);
+    procedure JugarClick(Sender: TObject);
+    procedure SalirClick(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
+
+    procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+
+  private
+    User   : PCB;       //Para almacenar al personaje del usuario.  Este PCB no se encolará, y por tanto no lo manipulará el PlanificadorRR.
+    Q      : Cola;      //Cola del Planificador RR.
+    Estado : Integer;   //0=No pasa nada, 1=Murió el User, 2=Murió la Nave
+
+    procedure InitJuego();
+    procedure CicloJuego;
+    procedure Dibujar(P:PCB);
+    procedure cls;
+
+    procedure Borrar(P:PCB);
+    procedure Rectangulo(x,y, Ancho, Alto, Color : Integer);
+    function MaxX : Integer;
+    function MaxY : Integer;
+
+    procedure PlanificadorRR;
+    procedure MoverNave(PRUN : PCB);
+    procedure MoverBalaUser(PRUN : PCB);
+    procedure MoverBalaNave(PRUN : PCB);
+
+    procedure CrearNave(anchoNave, altoNave, color, posX, posY:integer);
+    procedure CrearBalaNave(anchoBala, altoBala, color:integer; PRUN:PCB);
+  public
+
+  end;
+
+var
+  Form1: TForm1;
+
+implementation
+{$R *.dfm}
+
+
+procedure TForm1.FormCreate(Sender: TObject);
+begin
+  Q := Cola.Create;    //Construir (new) la cola del PlanificadorRR.
+end;
+
+procedure TForm1.JugarClick(Sender: TObject);
+begin
+  InitJuego();
+end;
+
+procedure TForm1.SalirClick(Sender: TObject);
+begin
+  Estado := 100;   //Para salir del ciclo del Juego
+  Application.Terminate;
+end;
+
+procedure TForm1.FormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  SalirClick(Sender);
+end;
+
+procedure TForm1.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+ var
+   P : PCB;
+
+begin
+   case Key of
+     VK_RIGHT : begin  //El user pulsó la tecla Flecha-Derecha
+                   Borrar(User);
+                   User.x := User.x + 10;
+                   if User.x > MaxX - User.Ancho then
+                      User.x := MaxX - User.Ancho;
+                   Dibujar(User);
+                end;
+
+      VK_LEFT : begin   //El user pulsó la tecla Flecha-Izquierda
+                   Borrar(User);
+                   User.x := User.x - 10;
+                   if (user.x < 0) then
+                       user.x := 0;
+
+                   Dibujar(User);
+                 end;
+
+      VK_UP : begin
+                Borrar(User);
+                User.y := User.y - 10;
+                if User.y < 0 then
+                  User.y := 0;
+                Dibujar(User);
+              end;
+
+      VK_DOWN : begin
+                Borrar(User);
+                User.y := User.y + 10;
+                if User.y > MaxY - User.Alto then
+                  User.y := MaxY - User.Alto;
+                Dibujar(User);
+              end;
+
+      VK_SPACE : begin   //Crear un proceso BALAU
+                   P.Tipo  := BALAU;
+                   P.Ancho := 5;
+                   P.Alto  := 10;
+                   P.Color := clNavy;
+
+                   P.x     := (User.Ancho-P.Ancho) div 2 + User.x;
+                   P.y     :=  User.y - P.Alto;
+
+                   P.Retardo := 50;
+                   P.Hora    := GetTickCount;
+                   Dibujar(P);
+
+                   Q.Meter(P);
+                 end;
+   end;
+end;
+
+procedure TForm1.InitJuego;
+  var
+    N : PCB;
+    i : integer;
+  j: Integer;
+begin
+  cls();      //Borrar el formulario
+  Q.Init();   //Vaciar la cola
+
+  //Posicionar, dibujar y meter la nave a la cola Q.
+  for i := 0 to 7 do
+  begin
+    for j := 0 to 2 do
+    begin
+      CrearNave(30, 30, clRed, 200 + i * 100, 5 + j * 60);
+    end;
+  end;
+
+    //Posicionar y dibujar el cañon (personaje del user).
+  User.Ancho := 30;
+  User.Alto   := 30;
+  User.Color  := clGreen;
+  User.x := (ClientWidth - User.Ancho) DIV 2;
+  User.y := MaxY - User.Alto - 1;
+  Dibujar(User);
+
+  CicloJuego();
+
+end;
+
+procedure TForm1.CicloJuego;
+begin
+    Estado := 0;
+    while (Estado = 0) do
+      begin
+        PlanificadorRR();
+        Application.ProcessMessages();   //Para que se procesen eventos (click, teclas, etc)
+      end;
+end;
+
+
+procedure TForm1.PlanificadorRR;
+var
+  PRUN : PCB;
+
+begin
+  PRUN := Q.Sacar();
+
+
+  if PRUN.Hora + PRUN.Retardo > GetTickCount then
+     Q.Meter(PRUN)
+   else
+      case PRUN.Tipo of
+         NAVE  : MoverNave(PRUN);
+         BALAU : MoverBalaUser(PRUN);
+         BALAN : MoverBalaNave(PRUN);
+      end;
+end;
+
+
+procedure TForm1.crearNave(anchoNave, altoNave, color, posX, posY: INTEGER);
+var
+  NAV : PCB;
+begin
+  NAV.Tipo := NAVE;
+  NAV.Ancho := anchoNave;
+  NAV.Alto := altoNave;
+  NAV.Color := color;
+  NAV.x := (posX - NAV.Ancho) div 2;
+  NAV.y := posY;
+  NAV.Hora := GetTickCount;
+  NAV.Retardo := 100;
+  NAV.Turno := DERECHA;
+  Dibujar(NAV);
+  Q.Meter(NAV);
+end;
+
+procedure TForm1.CrearBalaNave(anchoBala, altoBala, color:integer; PRUN:PCB);
+var
+  BALA : PCB;
+begin
+  BALA.Tipo := BALAN;
+  BALA.Ancho := anchoBala;
+  BALA.Alto := altoBala;
+  BALA.Color := color;
+  BALA.x := (PRUN.Ancho - BALA.Ancho) div 2 + PRUN.x;
+  BALA.y := PRUN.y + PRUN.Alto + BALA.Alto;
+
+  BALA.Retardo := 50;
+  BALA.Hora := GetTickCount;
+  Dibujar(BALA);
+
+  Q.Meter(BALA);
+end;
+
+procedure TForm1.MoverNave(PRUN: PCB);
+var
+  P : PCB;
+begin
+    //Mover la nave 5 px a la izquierda y meterla a la cola
+  Borrar(PRUN);
+  Dibujar(PRUN);
+  PRUN.Hora := GetTickCount;
+  Q.Meter(PRUN);
+
+    //Disparar
+  if Random(100)= 0 then
+      begin  //Crear un proceso BALAN
+        CrearBalaNave(5, 10, clRed, PRUN);
+      end;
+end;
+
+
+procedure TForm1.MoverBalaNave(PRUN: PCB);
+begin  //Algoritmo para mover la bala de la nave (BALAN)
+  Borrar(PRUN);
+  PRUN.y := PRUN.y + 5;   //Mover la BALAN 5 px (píxeles) hacia abajo.
+
+  if PRUN.y < MaxY then  //IF (la BALAN aún no tocó el suelo)
+    begin
+      PRUN.Hora := GetTickCount;
+      Dibujar(PRUN);
+
+      Q.Meter(PRUN);
+    end;
+end;
+
+
+procedure TForm1.MoverBalaUser(PRUN: PCB);
+begin
+  Borrar(PRUN);
+  PRUN.y := PRUN.y - 5;
+
+  if PRUN.y > 0 then // IF (la BALAU aún no tocó el techo)
+  begin
+    PRUN.Hora := GetTickCount;
+    Dibujar(PRUN);
+    Q.Meter(PRUN);
+  end;
+end;
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ***** Funciones para Manipular los "Gráficos".
+procedure TForm1.cls;
+begin  //Borra el Canvas del Form
+  Rectangulo(0,0,ClientWidth, ClientHeight, SELF.Color);
+end;
+
+
+procedure TForm1.Dibujar(P: PCB);
+begin  //Dibuja al PCB P como un rectangulo en la pantalla.
+  Rectangulo(P.x, P.y, P.Ancho, P.Alto, P.Color);
+end;
+
+
+procedure TForm1.Borrar(P: PCB);
+begin //Dibuja al PCB P como un rectangulo en la pantalla, del mismo color del Form.
+  Rectangulo(P.x, P.y, P.Ancho, P.Alto, SELF.Color);
+end;
+
+
+procedure TForm1.Rectangulo(x, y, Ancho, Alto, Color: Integer);
+begin   //Dibuja un rectangulo con esquina superior Izq en (x,y).
+  Canvas.Pen.Color := Color;
+  Canvas.Brush.Color := Color;
+  Canvas.Rectangle(x, y, x+Ancho-1, y+Alto-1);
+end;
+
+
+function TForm1.MaxX: Integer;
+begin
+  RESULT := ClientWidth-1;
+end;
+
+
+function TForm1.MaxY: Integer;
+begin
+  RESULT := ClientHeight-1;
+end;
+
+END.
